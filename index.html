@@ -38,8 +38,9 @@
   .stats{display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:10px}
   .stat{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 4px; text-align:center}
   .stat .v{font-size:1.25rem; font-weight:900}
-  .stat .l{font-size:.58rem; color:var(--dim); margin-top:2px; letter-spacing:.3px}
-  .g .v{color:#ffd54a} .sv .v{color:#cfd8e3} .bz .v{color:#e0a370} .tn .v{color:var(--dim)}
+  .stat .l{font-size:.56rem; color:var(--dim); margin-top:2px; letter-spacing:.3px}
+  .bk .v{color:#ffd54a; font-size:1.3rem}
+  .g .v{color:#ffd54a} .sv .v{color:#cfd8e3} .tn .v{color:var(--sun)}
   .legend{color:var(--dim); font-size:.64rem; margin:0 2px 12px; line-height:1.55}
   .src{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
   .src .s{border:1px solid var(--line); background:var(--panel); color:var(--dim);
@@ -65,10 +66,10 @@
   .resb.win{background:rgba(16,185,129,.14); color:#34d399}
   .resb.place{background:rgba(251,191,36,.12); color:#fbbf24}
   .resb.lose{background:rgba(239,68,68,.10); color:#f87171}
+  .resb.pend{background:rgba(148,163,184,.10); color:#94a3b8}
   .odds{color:var(--dim); font-size:.68rem; font-weight:700; width:44px; text-align:right; flex-shrink:0}
   .note{color:var(--dim); font-size:.64rem; text-align:center; margin:6px 0 12px}
-  .err{background:rgba(239,68,68,.1); color:#fca5a5; border:1px solid rgba(239,68,68,.35);
-    padding:10px 12px; border-radius:10px; font-size:.72rem; margin:10px 0}
+  .sing{color:var(--dim); font-size:.6rem; text-align:center; margin:8px 0 14px; opacity:.85}
   .foot{color:var(--dim); font-size:.66rem; margin-top:18px; text-align:center; line-height:1.6}
 </style>
 </head>
@@ -83,14 +84,17 @@
   <div class="days" id="days"></div>
   <div class="stats" id="stats"></div>
   <div class="legend">
-    🏆 <b>Gold cup</b> — picked by <b>all three</b> apps (even bigger chance) &nbsp;·&nbsp;
-    🥈 <b>Silver</b> — two apps &nbsp;·&nbsp; 🥉 <b>Bronze</b> — any one app
+    🏆 <b>Gold cup</b> — all <b>three</b> apps picked it &nbsp;·&nbsp; 🥈 <b>Silver</b> — two apps agree &nbsp;·&nbsp;
+    singles are not shown and not bet<br>
+    Bets: gold + silver · <b>1% of the running bank</b> (£10.00 start) · win pays the odds · place pays a quarter · loss costs the stake · non-runners returned
   </div>
   <div class="src" id="src"></div>
   <div id="body"><div class="note">checking all three apps…</div></div>
-  <div class="foot" id="foot">© Dave Court · DGS Bollx v1.0</div>
+  <div class="foot" id="foot">© Dave Court · The Dogs Bollox v1.2</div>
 <script>
-const APP_VER = "1.1";
+const APP_VER = "1.2";
+const START_BANK = 10.0;
+const STAKE_PCT = 0.01;
 const APPS = [
   { key: "S", cls: "c-a", name: "Sandstorm",
     url: d => `https://jobsaboba.github.io/wonderland/data/${d}.json` },
@@ -104,16 +108,18 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
 const hnorm = s => String(s || "").toLowerCase().normalize("NFKD")
   .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
 const cnorm = s => hnorm(s).replace(/park$/, "");
+const parseOdds = s => {
+  const m = String(s || "").match(/^\d+\s*\/\s*\d+$/);
+  return m ? m[0].split("/").map(Number).reduce((a, b) => a / b) : null;
+};
 
 function londonToday(){
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(new Date());
 }
-function chips(){
-  const out = [];
+function dateOff(i){
   const d = new Date(londonToday() + "T12:00:00Z");
-  for (let i = 0; i < 4; i++)
-    out.push(new Date(d.getTime() - i * 864e5).toISOString().slice(0, 10));
-  return out;
+  d.setUTCDate(d.getUTCDate() - i);
+  return d.toISOString().slice(0, 10);
 }
 
 /* what counts as a pick for each app:
@@ -141,115 +147,165 @@ function extract(key, j){
   return rows;
 }
 
-async function loadDay(dstr){
-  const cb = Date.now();
-  const badge = [];
-  const picks = await Promise.all(APPS.map(async (a, i) => {
-    try{
-      const r = await fetch(a.url(dstr) + "?cb=" + cb, { cache: "no-store" });
-      if (!r.ok) throw new Error("http " + r.status);
-      const j = await r.json();
-      const rows = extract(a.key, j);
-      badge[i] = { ok: true, n: rows.length, stamp: j.generated || j.updated || "" };
-      return rows;
-    }catch(e){
-      badge[i] = { ok: false, n: 0 };
-      return [];
-    }
-  }));
-
-  // join on course | time | horse
+function joinDay(rec){
+  const [w, g, j] = rec.raw;
+  const picks = [
+    ...(w ? extract("S", w) : []),
+    ...(g ? extract("G", g) : []),
+    ...(j ? extract("J", j) : []),
+  ];
   const groups = {};
-  for (const p of picks.flat()){
+  for (const p of picks){
     const k = [cnorm(p.course), p.time, hnorm(p.horse)].join("|");
-    (groups[k] ??= { srcs: [], odds: [], res: [] });
-    const g = groups[k];
-    if (!g.srcs.includes(p.key)) g.srcs.push(p.key);
-    if (p.odds && !g[`o${p.key}`]) g[`o${p.key}`] = p.odds;
-    if (p.res) g.res.push(p.res);
+    const gr = (groups[k] ??= { srcs: [], odds: [], res: [] });
+    if (!gr.srcs.includes(p.key)) gr.srcs.push(p.key);
+    if (p.odds && !gr["o" + p.key]) gr["o" + p.key] = p.odds;
+    if (p.res) gr.res.push(p.res);
   }
-  const list = Object.entries(groups).map(([k, g]) => {
+  return Object.entries(groups).map(([k, gr]) => {
     const [course, time, horse] = k.split("|");
-    const res = (g.res.find(x => x === "WIN") || g.res[0] || null);
-    return { course, time, horse, apps: g.srcs,
-             odds: g.oS || g.oG || g.oJ || null, res };
+    const known = gr.res.filter(Boolean);
+    const pick = known.includes("WIN") ? "WIN" :
+                 known.includes("PLACE") ? "PLACE" :
+                 known.includes("LOSE") ? "LOSE" : (known[0] || null);
+    return { course, time, horse, apps: gr.srcs,
+             odds: gr.oS || gr.oG || gr.oJ || null, res: pick };
   });
-  list.sort((x, y) => (y.apps.length - x.apps.length) ||
-                      ((x.time || "").localeCompare(y.time || "")) ||
-                      String(x.course).localeCompare(String(y.course)) ||
-                      String(x.horse).localeCompare(String(y.horse)));
-  render(dstr, list, badge);
 }
 
-function render(dstr, list, badge){
-  const med = n => n >= 3 ? "🏆" : n === 2 ? "🥈" : "🥉";
-  const now = new Intl.DateTimeFormat("en-GB", { timeZone:"Europe/London",
-    hour:"2-digit", minute:"2-digit" }).format(new Date());
-  const nApps = n => list.filter(r => r.apps.length === n).length;
-  const nG = nApps(3), nS = nApps(2), nB = nApps(1);
+const HIST = { recs: [], perDay: new Map(), bank: START_BANK,
+               settled: 0, w: 0, p: 0, l: 0 };
+let DAY = null;
+
+async function boot(){
+  document.getElementById("body").innerHTML =
+    `<div class="note">checking all three apps…</div>`;
+  const cb = Date.now();
+  const recs = [];
+  let miss = 0;
+  let medalSeen = false, medalGap = 0;
+  for (let i = 0; i < 30; i++){
+    const d = dateOff(i);
+    const raw = await Promise.all(APPS.map(async a => {
+      try{
+        const r = await fetch(a.url(d) + "?cb=" + cb, { cache: "no-store" });
+        if (!r.ok) return null;
+        return await r.json();
+      }catch(e){ return null; }
+    }));
+    if (!raw.some(Boolean)){ if (++miss >= 3) break; continue; }
+    miss = 0;
+    const rec = { date: d, raw };
+    rec.rows = joinDay(rec);
+    recs.push(rec);
+    // the bank only counts medals — once 7 straight medal-free days go by
+    // behind the last medal day, there is nothing further back worth fetching
+    if (rec.rows.some(r => r.apps.length >= 2)){ medalSeen = true; medalGap = 0; }
+    else if (medalSeen && ++medalGap >= 7) break;
+  }
+  recs.reverse();
+
+  let bank = START_BANK;
+  for (const rec of recs){
+    const rows = rec.rows;
+    rows.sort((x, y) => (x.time || "").localeCompare(y.time || "") ||
+                        String(x.course).localeCompare(String(y.course)) ||
+                        String(x.horse).localeCompare(String(y.horse)));
+    for (const r of rows){
+      if (r.apps.length < 2){ r.state = "single"; continue; }
+      const st = ["WIN", "PLACE", "LOSE"].includes(r.res) ? r.res
+               : r.res ? "nr" : "pending";
+      r.state = st;
+      const pd = parseOdds(r.odds);
+      if (st === "nr" || pd === null || st === "pending") continue;
+      const stake = bank * STAKE_PCT;
+      bank += st === "WIN" ? stake * pd
+            : st === "PLACE" ? stake * pd / 4
+            : -stake;
+      HIST.settled++;
+      if (st === "WIN") HIST.w++; else if (st === "PLACE") HIST.p++; else HIST.l++;
+    }
+    HIST.perDay.set(rec.date, rows);
+  }
+  HIST.bank = bank;
+  HIST.recs = recs;
+
+  DAY = recs.some(r => r.date === londonToday())
+      ? londonToday() : recs[recs.length - 1].date;
+  drawChips();
+  renderDay();
+}
+
+function drawChips(){
+  document.getElementById("days").innerHTML = HIST.recs.map(r =>
+    `<button class="day ${r.date === DAY ? "on" : ""}" data-d="${r.date}">
+      ${r.date.slice(8)}/${r.date.slice(5, 7)}</button>`).join("");
+  document.querySelectorAll(".day").forEach(el =>
+    el.addEventListener("click", () => { DAY = el.dataset.d; drawChips(); renderDay(); }));
+}
+
+function renderDay(){
+  const h = HIST;
+  const rows = h.perDay.get(DAY) || [];
+  const m2 = rows.filter(r => r.apps.length >= 2);
+  const gold = m2.filter(r => r.apps.length === 3);
+  const silv = m2.filter(r => r.apps.length === 2);
+  const singles = rows.length - m2.length;
+  const now = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London",
+    hour: "2-digit", minute: "2-digit" }).format(new Date());
+
   document.getElementById("stats").innerHTML = `
-    <div class="stat g"><div class="v">${nG}</div><div class="l">GOLD · ALL 3</div></div>
-    <div class="stat sv"><div class="v">${nS}</div><div class="l">SILVER · 2 APPS</div></div>
-    <div class="stat bz"><div class="v">${nB}</div><div class="l">BRONZE · 1 APP</div></div>
-    <div class="stat tn"><div class="v">${list.length}</div><div class="l">PICKS ${dstr.slice(5).replace("-", "/")}</div></div>`;
+    <div class="stat bk"><div class="v">£${h.bank.toFixed(2)}</div>
+      <div class="l">BANK · £10 START · 1% A BET</div></div>
+    <div class="stat g"><div class="v">${gold.length}</div><div class="l">GOLD · ALL 3</div></div>
+    <div class="stat sv"><div class="v">${silv.length}</div><div class="l">SILVER · 2 APPS</div></div>
+    <div class="stat tn"><div class="v">${h.settled}</div>
+      <div class="l">BETS · ${h.w}W ${h.p}P ${h.l}L</div></div>`;
+
+  const rec = h.recs.find(r => r.date === DAY);
+  const raw = rec ? rec.raw : [null, null, null];
   document.getElementById("src").innerHTML = APPS.map((a, i) => {
-    const b = badge[i];
-    return `<span class="s ${b && b.ok ? "" : "bad"}">
+    const n = raw[i] ? extract(a.key, raw[i]).length : null;
+    return `<span class="s ${n === null ? "bad" : ""}">
       <span class="k">${a.key}</span> ${esc(a.name)} ·
-      ${b && b.ok ? b.n + " picked" : "no day data"}</span>`;
+      ${n === null ? "no day data" : n + " picked"}</span>`;
   }).join("");
 
-  const band = { 3: "🏆 ALL THREE — the real bets",
-                 2: "🥈 TWO apps agree",
-                 1: "🥉 singles — watch list" };
-  let out = "", cur = null;
-  for (const r of list){
-    const b = r.apps.length;
-    if (b !== cur){
-      if (cur !== null) out += `</div>`;
-      cur = b;
-      out += `<div class="rc"><div class="h2">
-        <span class="t">${band[cur]}</span>
-        <span class="c">${nApps(cur)}</span></div>`;
+  let out = "";
+  const band = (t, n, list, medal) => {
+    let s = `<div class="rc"><div class="h2">
+      <span class="t">${t}</span><span class="c">${n}</span></div>`;
+    for (const r of list){
+      const pills = APPS.filter(a => r.apps.includes(a.key))
+        .map(a => `<span class="chip ${a.cls}">${a.key === "S" ? "🌪" : a.key === "G" ? "🏆" : "🪜"} ${a.key === "J" ? "JL" : a.key}</span>`).join("");
+      const cls = { WIN: "win", PLACE: "place", LOSE: "lose",
+                    pending: "pend", nr: "pend", single: "pend" }[r.state] || "pend";
+      const label = { pending: "PENDING", nr: "NR", WIN: "WIN",
+                      PLACE: "PLACE", LOSE: "LOSE" }[r.state] || "";
+      s += `<div class="row">
+        <div class="m">${medal}</div>
+        <div class="who">
+          <div class="h">${esc(r.horse)}</div>
+          <div class="d">${esc(r.course)} · ${esc(r.time)}</div>
+          <div class="chips">${pills}</div>
+        </div>
+        <div><span class="resb ${cls}">${esc(label)}</span></div>
+        <div class="odds">${esc(r.odds || "")}</div>
+      </div>`;
     }
-    const pills = APPS.filter(a => r.apps.includes(a.key))
-      .map(a => `<span class="chip ${a.cls}">${a.key === "S" ? "🌪" : a.key === "G" ? "🏆" : "🪜"} ${a.key === "J" ? "JL" : a.key}</span>`).join("");
-    const resb = r.res ? `<span class="resb ${String(r.res).toLowerCase()}">${esc(String(r.res).toUpperCase())}</span>` : "";
-    out += `<div class="row">
-      <div class="m">${med(b)}</div>
-      <div class="who">
-        <div class="h">${esc(r.horse)}</div>
-        <div class="d">${esc(r.course)} · ${esc(r.time)}</div>
-        <div class="chips">${pills}</div>
-      </div>
-      <div>${resb}</div>
-      <div class="odds">${esc(r.odds || "")}</div>
-    </div>`;
-  }
-  if (cur !== null) out += `</div>`;
-  if (!list.length)
-    out = `<div class="note">no published picks for this day across the three apps yet</div>`;
+    return s + `</div>`;
+  };
+  if (gold.length) out += band("🏆 ALL THREE — the banker's bets", gold.length, gold, "🏆");
+  if (silv.length) out += band("🥈 TWO apps agree", silv.length, silv, "🥈");
+  if (!m2.length)
+    out += `<div class="note">no gold or silver for this day${singles ? ` — ${singles} singles hidden` : ""}</div>`;
+  else if (singles)
+    out += `<div class="sing">① ${singles} single-app pick${singles === 1 ? "" : "s"} hidden — no medal, no bet</div>`;
   document.getElementById("body").innerHTML = out;
   document.getElementById("foot").innerHTML =
     `© Dave Court · The Dogs Bollox v${APP_VER} · checked ${now} London`;
 }
 
-let DAY = null;
-function boot(){
-  const cs = chips();
-  DAY = DAY || londonToday();
-  if (!cs.includes(DAY)) cs.unshift(DAY);
-  document.getElementById("days").innerHTML = cs.map(d =>
-    `<button class="day ${d === DAY ? "on" : ""}" data-d="${d}">
-      ${d.slice(8)}/${d.slice(5, 7)}</button>`).join("");
-  document.querySelectorAll(".day").forEach(el =>
-    el.addEventListener("click", () => {
-      DAY = el.dataset.d; boot();
-    }));
-  document.getElementById("body").innerHTML =
-    `<div class="note">checking all three apps…</div>`;
-  loadDay(DAY);
-}
 boot();
 if ("serviceWorker" in navigator){
   navigator.serviceWorker.register("./sw.js").catch(() => {});
