@@ -16,8 +16,14 @@ What it does, every time it's opened:
 3. Medals the horses:
    - 🏆 **Gold cup** — picked by all three apps (even bigger chance of winning)
    - 🥈 **Silver** — two apps
-   - 🥉 **Bronze** — appears on any single app
+   - Singles (one app only) are hidden — no medal, no bet.
 4. Shows a WIN/PLACE/LOSE badge when one of the sources already knows the result.
+5. Running bank: £10.00 start, 1% of the current bank staked on every medal
+   (gold + silver), Sandstorm's hybrid terms — win pays the odds, place pays
+   a quarter of the odds, a loss costs the stake, non-runners returned.
+   Bets only settle when a result becomes known; recomputed from full
+   published history each open (the fetch tail stops 7 days past the last
+   medal day, so it stays light on the phone).
 
 Days shown: the last four (the same window the launcher settles each morning).
 
