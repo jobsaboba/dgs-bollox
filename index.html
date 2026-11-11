@@ -110,6 +110,22 @@ const APPS = [
   { key: "J", cls: "c-d", name: "Jacobs Ladder",
     url: d => `https://jobsaboba.github.io/jacobs-ladder/data/${d}.json` },
 ];
+// SL's JSON race times are UTC; BST months (late Mar–late Oct) show +1h.
+function ukTime(date, time){
+  try{
+    const p = date.split("-").map(Number);
+    const dt = Date.UTC(p[0], p[1] - 1, p[2], 12);
+    const lastSun = (mi) => { const e = new Date(Date.UTC(p[0], mi + 1, 0));
+                              return e.getUTCDate() - e.getUTCDay(); };
+    const start = Date.UTC(p[0], 2, lastSun(2), 1);
+    const end   = Date.UTC(p[0], 9, lastSun(9), 1);
+    let mins = Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+    if(dt >= start && dt < end) mins += 60;
+    return String(Math.floor(mins / 60) % 24).padStart(2, "0") + ":" +
+           String(mins % 60).padStart(2, "0");
+  }catch(e){ return time; }
+}
+
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const hnorm = s => String(s || "").toLowerCase().normalize("NFKD")
@@ -293,7 +309,7 @@ function renderDay(){
   let out = "";
   const band = (t, n, list, medal) => {
     let s = `<div class="rc"><div class="h2">
-      <span class="t">${t}</span><span class="c">${n}</span></div>`;
+      <span class="t">${esc(ukTime(DAY, t))}</span><span class="c">${n}</span></div>`;
     for (const r of list){
       const pills = APPS.filter(a => r.apps.includes(a.key))
         .map(a => `<span class="chip ${a.cls}">${a.key === "S" ? "🌪" : a.key === "G" ? "🏆" : "🪜"} ${a.key === "J" ? "JL" : a.key}</span>`).join("");
@@ -310,7 +326,7 @@ function renderDay(){
         <div class="m">${medal}</div>
         <div class="who">
           <div class="h">${esc(r.horse)}</div>
-          <div class="d">${esc(r.course)} · ${esc(r.time)}</div>
+          <div class="d">${esc(r.course)} · ${esc(ukTime(DAY, r.time))}</div>
           <div class="chips">${pills}</div>
         </div>
         <div><span class="resb ${cls}">${esc(label)}</span></div>
