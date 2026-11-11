@@ -68,6 +68,12 @@
   .resb.lose{background:rgba(239,68,68,.10); color:#f87171}
   .resb.pend{background:rgba(148,163,184,.10); color:#94a3b8}
   .odds{color:var(--dim); font-size:.68rem; font-weight:700; width:44px; text-align:right; flex-shrink:0}
+  .money{display:flex; gap:3px; align-items:center; flex-shrink:0}
+  .ms{font-size:.58rem; font-weight:800; padding:2px 6px; border-radius:999px;
+      background:rgba(148,163,184,.08); color:#cfd8e3; white-space:nowrap}
+  .ms.up{background:rgba(16,185,129,.14); color:#34d399}
+  .ms.dn{background:rgba(239,68,68,.10); color:#f87171}
+  .ms.bk{background:rgba(245,213,74,.10); color:#ffd54a}
   .note{color:var(--dim); font-size:.64rem; text-align:center; margin:6px 0 12px}
   .sing{color:var(--dim); font-size:.6rem; text-align:center; margin:8px 0 14px; opacity:.85}
   .foot{color:var(--dim); font-size:.66rem; margin-top:18px; text-align:center; line-height:1.6}
@@ -86,13 +92,14 @@
   <div class="legend">
     🏆 <b>Gold cup</b> — all <b>three</b> apps picked it &nbsp;·&nbsp; 🥈 <b>Silver</b> — two apps agree &nbsp;·&nbsp;
     singles are not shown and not bet<br>
-    Bets: gold + silver · <b>1% of the running bank</b> (£10.00 start) · win pays the odds · place pays a quarter · loss costs the stake · non-runners returned
+    Bets: gold + silver · <b>1% of the running bank</b> (£10.00 start) · win pays the odds · place pays a quarter · loss costs the stake · non-runners returned<br>
+    Row money: <b>s</b> = stake · <b>±£</b> = return · <b>→ £</b> = bank after that bet
   </div>
   <div class="src" id="src"></div>
   <div id="body"><div class="note">checking all three apps…</div></div>
-  <div class="foot" id="foot">© Dave Court · The Dogs Bollox v1.2</div>
+  <div class="foot" id="foot">© Dave Court · The Dogs Bollox v1.3</div>
 <script>
-const APP_VER = "1.2";
+const APP_VER = "1.3";
 const START_BANK = 10.0;
 const STAKE_PCT = 0.01;
 const APPS = [
@@ -184,7 +191,7 @@ async function boot(){
   const recs = [];
   let miss = 0;
   let medalSeen = false, medalGap = 0;
-  for (let i = 0; i < 30; i++){
+  for (let i = 0; i < 120; i++){
     const d = dateOff(i);
     const raw = await Promise.all(APPS.map(async a => {
       try{
@@ -216,12 +223,16 @@ async function boot(){
       const st = ["WIN", "PLACE", "LOSE"].includes(r.res) ? r.res
                : r.res ? "nr" : "pending";
       r.state = st;
+      if (st === "nr" || st === "pending") continue;
       const pd = parseOdds(r.odds);
-      if (st === "nr" || pd === null || st === "pending") continue;
-      const stake = bank * STAKE_PCT;
-      bank += st === "WIN" ? stake * pd
-            : st === "PLACE" ? stake * pd / 4
-            : -stake;
+      const stake = Math.max(0.01, Math.round(bank * STAKE_PCT * 100) / 100);
+      let ret;
+      if (pd === null) ret = -stake;               // settled, unpriced → stake lost
+      else if (st === "WIN") ret = Math.round(stake * pd * 100) / 100;
+      else if (st === "PLACE") ret = Math.round(stake * pd / 4 * 100) / 100;
+      else ret = -stake;
+      bank = Math.round((bank + ret) * 100) / 100;
+      r.stake = stake; r.ret = ret; r.bank = bank;  // rolling bank, bet by bet
       HIST.settled++;
       if (st === "WIN") HIST.w++; else if (st === "PLACE") HIST.p++; else HIST.l++;
     }
@@ -282,6 +293,11 @@ function renderDay(){
                     pending: "pend", nr: "pend", single: "pend" }[r.state] || "pend";
       const label = { pending: "PENDING", nr: "NR", WIN: "WIN",
                       PLACE: "PLACE", LOSE: "LOSE" }[r.state] || "";
+      const money = r.stake == null
+        ? `<span class="ms">—</span>`
+        : `<span class="ms">s £${r.stake.toFixed(2)}</span>` +
+          `<span class="ms ${r.ret >= 0 ? "up" : "dn"}">${r.ret >= 0 ? "+" : "−"}£${Math.abs(r.ret).toFixed(2)}</span>` +
+          `<span class="ms bk">→ £${r.bank.toFixed(2)}</span>`;
       s += `<div class="row">
         <div class="m">${medal}</div>
         <div class="who">
@@ -290,6 +306,7 @@ function renderDay(){
           <div class="chips">${pills}</div>
         </div>
         <div><span class="resb ${cls}">${esc(label)}</span></div>
+        <div class="money">${money}</div>
         <div class="odds">${esc(r.odds || "")}</div>
       </div>`;
     }
